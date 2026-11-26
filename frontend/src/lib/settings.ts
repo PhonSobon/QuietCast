@@ -33,7 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   systemAudio: true,
   cameraDeviceId: "",
   format: "webm",
-  overlay: { visible: true, position: "bottom-right", size: "medium", shape: "circle", mirror: true },
+  overlay: { visible: true, x: 0.86, y: 0.8, size: "medium", shape: "circle", mirror: true },
   countdown: 3,
   autoStopMin: 0,
   autoUpload: false,
@@ -51,11 +51,15 @@ export function useSettings() {
       const raw = localStorage.getItem(KEY);
       if (raw) {
         const saved = JSON.parse(raw);
-        setSettings({
-          ...DEFAULT_SETTINGS,
-          ...saved,
-          overlay: { ...DEFAULT_SETTINGS.overlay, ...(saved.overlay ?? {}) },
-        });
+        const overlay = { ...DEFAULT_SETTINGS.overlay, ...(saved.overlay ?? {}) };
+        // older versions stored a fixed corner instead of a free position
+        const corner = saved.overlay?.position as string | undefined;
+        if (corner && typeof saved.overlay?.x !== "number") {
+          overlay.x = corner.endsWith("left") ? 0.14 : 0.86;
+          overlay.y = corner.startsWith("top") ? 0.2 : 0.8;
+        }
+        delete (overlay as { position?: string }).position;
+        setSettings({ ...DEFAULT_SETTINGS, ...saved, overlay });
       }
     } catch {
       /* storage unavailable */

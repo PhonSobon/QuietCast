@@ -4,14 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import LiveVideo from "./LiveVideo";
 import MicMeter from "./MicMeter";
 import ReviewPanel, { type ReviewResult } from "./ReviewPanel";
-import { Field, Section, Segmented, Toggle } from "./ui";
+import { Row, Segmented, Tabs, Toggle } from "./ui";
 import { type Health, health } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
 import {
-  type Corner,
   type FormatOption,
+  type Mode,
+  OVERLAY_SIZE,
   type OverlayOptions,
   RecordingSession,
+  overlayAspect,
   describeMediaError,
   getSupportedFormats,
   isRecordingSupported,
@@ -21,7 +23,7 @@ import { type Settings, useSettings } from "@/lib/settings";
 
 type Phase = "setup" | "preparing" | "countdown" | "recording" | "paused" | "review";
 
-const BUBBLE_SIZE = { small: 16, medium: 22, large: 30 } as const;
+type Tab = "video" | "camera" | "audio" | "more";
 
 export default function Recorder() {
   const { settings, update, updateOverlay } = useSettings();
@@ -42,6 +44,8 @@ export default function Recorder() {
   const [result, setResult] = useState<ReviewResult | null>(null);
   const [saved, setSaved] = useState(false);
   const [denoiser, setDenoiser] = useState<Health["denoiser"] | null>(null);
+  const [liveAspect, setLiveAspect] = useState(16 / 9);
+  const [tab, setTab] = useState<Tab>("video");
 
   const sessionRef = useRef<RecordingSession | null>(null);
   const finishingRef = useRef(false);
@@ -202,6 +206,7 @@ export default function Recorder() {
     session.onSourceEnded = () => void finish();
     try {
       const out = await session.prepare();
+      setLiveAspect(session.width && session.height ? session.width / session.height : 16 / 9);
       setLiveStream(out);
     } catch (e) {
       sessionRef.current = null;
@@ -318,17 +323,27 @@ export default function Recorder() {
 
   const active = phase === "recording" || phase === "paused";
   const busy = phase !== "setup";
+  const currentTab: Tab = tab === "camera" && !usesCamera ? "video" : tab;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-      {/* Stage */}
-      <div className="space-y-4">
+    <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
+      {/* Left: mode, preview, controls */}
+      <div className="min-w-0 space-y-4">
+        <ModePicker
+          value={settings.mode}
+          disabled={busy}
+          screenSupported={support.screen}
+          onChange={(mode) => update({ mode })}
+        />
+
         <Stage
           phase={phase}
           settings={settings}
           camPreview={camPreview}
           liveStream={liveStream}
+          aspect={liveStream ? liveAspect : 16 / 9}
           countdown={countdown}
+          onMoveCamera={(x, y) => updateOverlay({ x, y })}
         />
 
         {error && (
@@ -384,119 +399,108 @@ export default function Recorder() {
               ■ Stop
             </button>
             {settings.mode === "screen_camera" && (
-              <div className="ml-auto flex flex-wrap items-center gap-2">
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => updateOverlay({ visible: !settings.overlay.visible })}
-                >
-                  {settings.overlay.visible ? "Hide camera" : "Show camera"}
-                </button>
-                <CornerPicker value={settings.overlay.position} onChange={(position) => updateOverlay({ position })} />
-              </div>
+              <button
+                className="btn btn-ghost ml-auto"
+                onClick={() => updateOverlay({ visible: !settings.overlay.visible })}
+              >
+                {settings.overlay.visible ? "Hide camera" : "Show camera"}
+              </button>
             )}
           </div>
         )}
       </div>
 
-      {/* Settings */}
-      <aside className="card h-fit space-y-5 p-5">
-        <Section title="Recording mode">
-          <Segmented
-            value={settings.mode}
-            disabled={busy}
-            onChange={(mode) => update({ mode })}
-            options={[
-              { value: "screen", label: "Screen", disabled: !support.screen },
-              { value: "camera", label: "Camera" },
-              { value: "screen_camera", label: "Screen + Cam", disabled: !support.screen },
-            ]}
-          />
-        </Section>
+      {/* Right: compact tabbed settings */}
+      <aside className="card h-fit overflow-hidden">
+        <Tabs
+          value={currentTab}
+          onChange={setTab}
+          tabs={[
+            { id: "video", label: "Video" },
+            ...(usesCamera ? [{ id: "camera" as Tab, label: "Camera" }] : []),
+            { id: "audio", label: "Audio", badge: settings.aiDenoise && !!denoiser?.available },
+            { id: "more", label: "More" },
+          ]}
+        />
 
-        <Section title="Video">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Quality">
-              <select
-                className="select"
-                disabled={busy}
-                value={settings.resolution}
-                onChange={(e) => update({ resolution: e.target.value as Settings["resolution"] })}
-              >
-                <option value="720p">720p HD</option>
-                <option value="1080p">1080p Full HD</option>
-                <option value="1440p">1440p 2K</option>
-              </select>
-            </Field>
-            <Field label="Frame rate">
-              <Segmented
-                value={settings.fps}
-                disabled={busy}
-                onChange={(fps) => update({ fps })}
-                options={[
-                  { value: 30, label: "30" },
-                  { value: 60, label: "60" },
-                ]}
-              />
-            </Field>
-          </div>
-          {usesScreen && (
-            <Field label="Share">
-              <select
-                className="select"
-                disabled={busy}
-                value={settings.displaySurface}
-                onChange={(e) => update({ displaySurface: e.target.value as Settings["displaySurface"] })}
-              >
-                <option value="any">Let me choose</option>
-                <option value="monitor">Entire screen</option>
-                <option value="window">A window</option>
-                <option value="browser">A browser tab</option>
-              </select>
-            </Field>
+        <div className="space-y-3.5 p-4">
+          {currentTab === "video" && (
+            <>
+              <Row label="Quality">
+                <select
+                  className="select"
+                  disabled={busy}
+                  value={settings.resolution}
+                  onChange={(e) => update({ resolution: e.target.value as Settings["resolution"] })}
+                >
+                  <option value="720p">720p HD</option>
+                  <option value="1080p">1080p Full HD</option>
+                  <option value="1440p">1440p 2K</option>
+                </select>
+              </Row>
+              <Row label="Frame rate">
+                <Segmented
+                  value={settings.fps}
+                  disabled={busy}
+                  onChange={(fps) => update({ fps })}
+                  options={[
+                    { value: 30, label: "30 fps" },
+                    { value: 60, label: "60 fps" },
+                  ]}
+                />
+              </Row>
+              {usesScreen && (
+                <Row label="Share">
+                  <select
+                    className="select"
+                    disabled={busy}
+                    value={settings.displaySurface}
+                    onChange={(e) => update({ displaySurface: e.target.value as Settings["displaySurface"] })}
+                  >
+                    <option value="any">Let me choose</option>
+                    <option value="monitor">Entire screen</option>
+                    <option value="window">A window</option>
+                    <option value="browser">A browser tab</option>
+                  </select>
+                </Row>
+              )}
+              <Row label="Format">
+                <select
+                  className="select"
+                  disabled={busy || formats.length < 2}
+                  value={settings.format}
+                  onChange={(e) => update({ format: e.target.value as Settings["format"] })}
+                >
+                  {formats.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              </Row>
+            </>
           )}
-          <Field label="File format">
-            <select
-              className="select"
-              disabled={busy || formats.length < 2}
-              value={settings.format}
-              onChange={(e) => update({ format: e.target.value as Settings["format"] })}
-            >
-              {formats.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </Section>
 
-        {usesCamera && (
-          <Section title="Camera">
-            <Field label="Device">
-              <select
-                className="select"
-                disabled={busy}
-                value={settings.cameraDeviceId}
-                onChange={(e) => update({ cameraDeviceId: e.target.value })}
-              >
-                <option value="">Default camera</option>
-                {cams.map((d, i) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Camera ${i + 1}`}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            {settings.mode === "screen_camera" && (
-              <>
-                <div className="grid grid-cols-[auto_1fr] items-end gap-3">
-                  <Field label="Position">
-                    <CornerPicker
-                      value={settings.overlay.position}
-                      onChange={(position) => updateOverlay({ position })}
-                    />
-                  </Field>
-                  <Field label="Size">
+          {currentTab === "camera" && usesCamera && (
+            <>
+              <Row label="Device">
+                <select
+                  className="select"
+                  disabled={busy}
+                  value={settings.cameraDeviceId}
+                  onChange={(e) => update({ cameraDeviceId: e.target.value })}
+                >
+                  <option value="">Default camera</option>
+                  {cams.map((d, i) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label || `Camera ${i + 1}`}
+                    </option>
+                  ))}
+                </select>
+              </Row>
+              {settings.mode === "screen_camera" && (
+                <>
+                  <Row label="Size">
                     <Segmented
                       value={settings.overlay.size}
                       onChange={(size) => updateOverlay({ size })}
@@ -506,153 +510,241 @@ export default function Recorder() {
                         { value: "large", label: "L" },
                       ]}
                     />
-                  </Field>
-                </div>
-                <Field label="Shape">
-                  <Segmented
-                    value={settings.overlay.shape}
-                    onChange={(shape) => updateOverlay({ shape })}
-                    options={[
-                      { value: "circle", label: "Circle" },
-                      { value: "rounded", label: "Rounded" },
-                      { value: "square", label: "Square" },
-                    ]}
+                  </Row>
+                  <Row label="Shape">
+                    <Segmented
+                      value={settings.overlay.shape}
+                      onChange={(shape) => updateOverlay({ shape })}
+                      options={[
+                        { value: "circle", label: "Circle" },
+                        { value: "rounded", label: "Round" },
+                        { value: "square", label: "Square" },
+                      ]}
+                    />
+                  </Row>
+                  <Toggle
+                    label="Show camera"
+                    checked={settings.overlay.visible}
+                    onChange={(visible) => updateOverlay({ visible })}
                   />
-                </Field>
-                <Toggle
-                  label="Show camera"
-                  checked={settings.overlay.visible}
-                  onChange={(visible) => updateOverlay({ visible })}
-                />
-              </>
-            )}
-            <Toggle
-              label="Mirror camera"
-              hint="Flip horizontally, like a mirror"
-              checked={settings.overlay.mirror}
-              disabled={busy && settings.mode === "camera"}
-              onChange={(mirror) => updateOverlay({ mirror })}
-            />
-          </Section>
-        )}
-
-        <Section title="Audio">
-          <Toggle
-            label="Microphone"
-            checked={settings.mic}
-            disabled={busy}
-            onChange={(mic) => update({ mic })}
-          />
-          {settings.mic && (
-            <>
-              <select
-                className="select"
-                disabled={busy}
-                value={settings.micDeviceId}
-                onChange={(e) => update({ micDeviceId: e.target.value })}
-              >
-                <option value="">Default microphone</option>
-                {mics.map((d, i) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Microphone ${i + 1}`}
-                  </option>
-                ))}
-              </select>
-              {phase === "setup" && <MicMeter stream={micPreview} />}
+                </>
+              )}
               <Toggle
-                label="Noise suppression"
-                checked={settings.noiseSuppression}
-                disabled={busy}
-                onChange={(noiseSuppression) => update({ noiseSuppression })}
+                label="Mirror"
+                checked={settings.overlay.mirror}
+                disabled={busy && settings.mode === "camera"}
+                onChange={(mirror) => updateOverlay({ mirror })}
+              />
+              {settings.mode === "screen_camera" && (
+                <p className="rounded-lg bg-white/[0.04] px-3 py-2 text-xs text-gray-400">
+                  ✋ Drag the camera on the preview to place it anywhere, even while recording.
+                </p>
+              )}
+            </>
+          )}
+
+          {currentTab === "audio" && (
+            <>
+              <Toggle label="Microphone" checked={settings.mic} disabled={busy} onChange={(mic) => update({ mic })} />
+              {settings.mic && (
+                <div className="space-y-2">
+                  <select
+                    className="select"
+                    disabled={busy}
+                    value={settings.micDeviceId}
+                    onChange={(e) => update({ micDeviceId: e.target.value })}
+                  >
+                    <option value="">Default microphone</option>
+                    {mics.map((d, i) => (
+                      <option key={d.deviceId} value={d.deviceId}>
+                        {d.label || `Microphone ${i + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                  {phase === "setup" && <MicMeter stream={micPreview} />}
+                  <Toggle
+                    label="Noise suppression"
+                    checked={settings.noiseSuppression}
+                    disabled={busy}
+                    onChange={(noiseSuppression) => update({ noiseSuppression })}
+                  />
+                </div>
+              )}
+              {usesScreen && (
+                <Toggle
+                  label="System / tab audio"
+                  hint='Tick "Share audio" in the browser picker.'
+                  checked={settings.systemAudio}
+                  disabled={busy}
+                  onChange={(systemAudio) => update({ systemAudio })}
+                />
+              )}
+              <div className="space-y-1.5 border-t border-white/10 pt-3">
+                <Toggle
+                  label="✨ AI noise removal"
+                  hint="NVIDIA RE-USE cleans the sound after saving."
+                  checked={settings.aiDenoise}
+                  disabled={!denoiser?.available}
+                  onChange={(aiDenoise) => update({ aiDenoise })}
+                />
+                <p className={`text-xs ${denoiser?.available ? "text-emerald-400" : "text-amber-300/80"}`}>
+                  {denoiser === null
+                    ? "Checking AI service…"
+                    : denoiser.available
+                      ? `● Ready${denoiser.device ? ` on ${denoiser.device}` : ""}`
+                      : `○ Unavailable: ${denoiser.error ?? "unknown error"}`}
+                </p>
+              </div>
+            </>
+          )}
+
+          {currentTab === "more" && (
+            <>
+              <Row label="Countdown">
+                <Segmented
+                  value={settings.countdown}
+                  disabled={busy}
+                  onChange={(countdown) => update({ countdown })}
+                  options={[
+                    { value: 0, label: "Off" },
+                    { value: 3, label: "3s" },
+                    { value: 5, label: "5s" },
+                    { value: 10, label: "10s" },
+                  ]}
+                />
+              </Row>
+              <Row label="Auto-stop">
+                <select
+                  className="select"
+                  disabled={busy}
+                  value={settings.autoStopMin}
+                  onChange={(e) => update({ autoStopMin: Number(e.target.value) })}
+                >
+                  <option value={0}>Never</option>
+                  {[1, 5, 10, 15, 30, 60, 120].map((m) => (
+                    <option key={m} value={m}>
+                      After {m} min
+                    </option>
+                  ))}
+                </select>
+              </Row>
+              <Toggle
+                label="Auto-save to library"
+                hint="Upload as soon as recording stops"
+                checked={settings.autoUpload}
+                onChange={(autoUpload) => update({ autoUpload })}
               />
             </>
           )}
-          {usesScreen && (
-            <Toggle
-              label="System / tab audio"
-              hint='Tick "Share audio" in the browser picker. Full system audio works on Windows & ChromeOS (Chrome/Edge).'
-              checked={settings.systemAudio}
-              disabled={busy}
-              onChange={(systemAudio) => update({ systemAudio })}
-            />
-          )}
-        </Section>
-
-        <Section title="AI noise removal">
-          <Toggle
-            label="Remove background noise (AI)"
-            hint="NVIDIA NemotronLabs RE-USE cleans noise, echo and poor-mic sound on the server after the recording is saved to the library."
-            checked={settings.aiDenoise}
-            disabled={!denoiser?.available}
-            onChange={(aiDenoise) => update({ aiDenoise })}
-          />
-          <p className={`text-xs ${denoiser?.available ? "text-emerald-400" : "text-amber-300/80"}`}>
-            {denoiser === null
-              ? "Checking AI service…"
-              : denoiser.available
-                ? `● AI service ready${denoiser.device ? ` on ${denoiser.device}` : ""}`
-                : `○ AI service unavailable: ${denoiser.error ?? "unknown error"}`}
-          </p>
-        </Section>
-
-        <Section title="Options">
-          <Field label="Countdown">
-            <Segmented
-              value={settings.countdown}
-              disabled={busy}
-              onChange={(countdown) => update({ countdown })}
-              options={[
-                { value: 0, label: "Off" },
-                { value: 3, label: "3s" },
-                { value: 5, label: "5s" },
-                { value: 10, label: "10s" },
-              ]}
-            />
-          </Field>
-          <Field label="Auto-stop after">
-            <select
-              className="select"
-              disabled={busy}
-              value={settings.autoStopMin}
-              onChange={(e) => update({ autoStopMin: Number(e.target.value) })}
-            >
-              <option value={0}>Never</option>
-              {[1, 5, 10, 15, 30, 60, 120].map((m) => (
-                <option key={m} value={m}>
-                  {m} minute{m > 1 ? "s" : ""}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Toggle
-            label="Auto-save to library"
-            hint="Upload to the server as soon as recording stops"
-            checked={settings.autoUpload}
-            onChange={(autoUpload) => update({ autoUpload })}
-          />
-        </Section>
+        </div>
       </aside>
     </div>
   );
 }
+
+// ------------------------------------------------------------------ mode picker
+
+const MODES: { value: Mode; label: string; icon: React.ReactNode }[] = [
+  {
+    value: "screen",
+    label: "Screen",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <rect x="3" y="4" width="18" height="12" rx="2" />
+        <path d="M8 20h8M12 16v4" />
+      </svg>
+    ),
+  },
+  {
+    value: "screen_camera",
+    label: "Screen + Cam",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <rect x="3" y="4" width="18" height="12" rx="2" />
+        <path d="M8 20h8M12 16v4" />
+        <circle cx="16.5" cy="11.5" r="2.5" fill="currentColor" stroke="none" />
+      </svg>
+    ),
+  },
+  {
+    value: "camera",
+    label: "Camera",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <rect x="3" y="6" width="13" height="12" rx="2" />
+        <path d="M16 10l5-3v10l-5-3z" />
+      </svg>
+    ),
+  },
+];
+
+function ModePicker({
+  value,
+  disabled,
+  screenSupported,
+  onChange,
+}: {
+  value: Mode;
+  disabled: boolean;
+  screenSupported: boolean;
+  onChange: (m: Mode) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label="Recording mode" className="grid grid-cols-3 gap-2">
+      {MODES.map((m) => {
+        const selected = m.value === value;
+        const off = disabled || (m.value !== "camera" && !screenSupported);
+        return (
+          <button
+            key={m.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={off && !selected}
+            onClick={() => onChange(m.value)}
+            className={`flex flex-col items-center justify-center gap-1 rounded-xl border px-2 py-2 text-xs font-medium transition sm:flex-row sm:gap-2 sm:px-3 sm:py-2.5 sm:text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+              selected
+                ? "border-brand bg-brand/10 text-white"
+                : "border-white/10 bg-white/[0.03] text-gray-400 hover:border-white/25 hover:text-gray-200"
+            }`}
+          >
+            {m.icon}
+            <span className="truncate">{m.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ stage
 
 function Stage({
   phase,
   settings,
   camPreview,
   liveStream,
+  aspect,
   countdown,
+  onMoveCamera,
 }: {
   phase: Phase;
   settings: Settings;
   camPreview: MediaStream | null;
   liveStream: MediaStream | null;
+  aspect: number;
   countdown: number;
+  onMoveCamera: (x: number, y: number) => void;
 }) {
   const o = settings.overlay;
+  const showBubble = settings.mode === "screen_camera" && o.visible && phase !== "review";
   return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black">
+    <div
+      className="relative mx-auto w-full overflow-hidden rounded-2xl border border-white/10 bg-black"
+      style={{ aspectRatio: String(aspect), maxWidth: `calc(70vh * ${aspect})` }}
+    >
       {liveStream ? (
+        // The camera is already drawn into the live stream; the bubble below is an invisible drag handle.
         <LiveVideo stream={liveStream} className="h-full w-full" />
       ) : settings.mode === "camera" ? (
         camPreview ? (
@@ -661,29 +753,27 @@ function Stage({
           <Placeholder text="Waiting for camera…" />
         )
       ) : (
-        <>
-          <Placeholder
-            text={phase === "preparing" ? "Choose what to share…" : "Your screen will appear here"}
-            screen
-          />
-          {settings.mode === "screen_camera" && o.visible && camPreview && <Bubble overlay={o} stream={camPreview} />}
-        </>
+        <Placeholder text={phase === "preparing" ? "Choose what to share…" : "Your screen will appear here"} screen />
+      )}
+
+      {showBubble && (liveStream || camPreview) && (
+        <CameraBubble overlay={o} stream={liveStream ? null : camPreview} onMove={onMoveCamera} />
       )}
 
       {phase === "countdown" && (
-        <div className="absolute inset-0 grid place-items-center bg-black/60">
+        <div className="pointer-events-none absolute inset-0 grid place-items-center bg-black/60">
           <span key={countdown} className="text-8xl font-bold text-white drop-shadow-lg">
             {countdown}
           </span>
         </div>
       )}
       {phase === "paused" && (
-        <div className="absolute inset-0 grid place-items-center bg-black/50">
+        <div className="pointer-events-none absolute inset-0 grid place-items-center bg-black/50">
           <span className="rounded-full bg-black/70 px-4 py-2 text-sm font-medium">Paused</span>
         </div>
       )}
       {phase === "recording" && (
-        <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-1 text-xs font-semibold">
+        <span className="pointer-events-none absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-1 text-xs font-semibold">
           <span className="h-2 w-2 animate-pulse rounded-full bg-brand" /> REC
         </span>
       )}
@@ -704,36 +794,99 @@ function Placeholder({ text, screen }: { text: string; screen?: boolean }) {
   );
 }
 
-function Bubble({ overlay: o, stream }: { overlay: OverlayOptions; stream: MediaStream }) {
-  const w = BUBBLE_SIZE[o.size];
-  const style: React.CSSProperties = {
-    width: `${w}%`,
-    aspectRatio: o.shape === "rounded" ? "4 / 3" : "1 / 1",
-    borderRadius: o.shape === "circle" ? "9999px" : o.shape === "rounded" ? "8%" : "0",
-    [o.position.startsWith("top") ? "top" : "bottom"]: "3%",
-    [o.position.endsWith("left") ? "left" : "right"]: "1.7%",
-  };
-  return (
-    <div className="absolute overflow-hidden border-2 border-white/90 shadow-xl" style={style}>
-      <LiveVideo stream={stream} mirror={o.mirror} fit="cover" className="h-full w-full" />
-    </div>
-  );
-}
+const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
-function CornerPicker({ value, onChange }: { value: Corner; onChange: (c: Corner) => void }) {
-  const corners: Corner[] = ["top-left", "top-right", "bottom-left", "bottom-right"];
+/**
+ * Camera bubble that can be dragged anywhere on the stage.
+ * - Setup: shows the camera preview.
+ * - Recording: the camera is already composited into the video, so this is a transparent
+ *   handle at exactly the same spot (same maths as the canvas compositor).
+ */
+function CameraBubble({
+  overlay: o,
+  stream,
+  onMove,
+}: {
+  overlay: OverlayOptions;
+  stream: MediaStream | null;
+  onMove: (x: number, y: number) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const grab = useRef<{ dx: number; dy: number } | null>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  const [dragging, setDragging] = useState(false);
+
+  // track the stage size so the bubble is clamped exactly like the recorded frame
+  useEffect(() => {
+    const parent = ref.current?.parentElement;
+    if (!parent) return;
+    const ro = new ResizeObserver(([entry]) =>
+      setBox({ w: entry.contentRect.width, h: entry.contentRect.height }),
+    );
+    ro.observe(parent);
+    return () => ro.disconnect();
+  }, []);
+
+  const bw = box.w * OVERLAY_SIZE[o.size];
+  const bh = bw / overlayAspect(o.shape);
+  const left = clamp(o.x * box.w - bw / 2, 0, box.w - bw);
+  const top = clamp(o.y * box.h - bh / 2, 0, box.h - bh);
+
+  const moveTo = (clientX: number, clientY: number) => {
+    const parent = ref.current?.parentElement;
+    if (!parent || !grab.current) return;
+    const r = parent.getBoundingClientRect();
+    const cx = clamp(clientX - r.left - grab.current.dx, bw / 2, r.width - bw / 2);
+    const cy = clamp(clientY - r.top - grab.current.dy, bh / 2, r.height - bh / 2);
+    onMove(cx / r.width, cy / r.height);
+  };
+
+  const live = !stream;
   return (
-    <div className="grid h-[38px] w-[60px] grid-cols-2 gap-1 rounded-lg border border-white/10 bg-[#141821] p-1">
-      {corners.map((c) => (
-        <button
-          key={c}
-          type="button"
-          title={c.replace("-", " ")}
-          aria-label={`Camera ${c.replace("-", " ")}`}
-          onClick={() => onChange(c)}
-          className={`rounded-sm ${value === c ? "bg-brand" : "bg-white/10 hover:bg-white/20"}`}
-        />
-      ))}
+    <div
+      ref={ref}
+      role="slider"
+      aria-label="Camera position. Drag to move."
+      title="Drag to move the camera"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        const b = e.currentTarget.getBoundingClientRect();
+        grab.current = { dx: e.clientX - (b.left + b.width / 2), dy: e.clientY - (b.top + b.height / 2) };
+        setDragging(true);
+      }}
+      onPointerMove={(e) => moveTo(e.clientX, e.clientY)}
+      onPointerUp={() => {
+        grab.current = null;
+        setDragging(false);
+      }}
+      onPointerCancel={() => {
+        grab.current = null;
+        setDragging(false);
+      }}
+      className={`group absolute touch-none select-none overflow-hidden ${dragging ? "cursor-grabbing" : "cursor-grab"} ${
+        live
+          ? `border-2 border-dashed ${dragging ? "border-white/80" : "border-transparent hover:border-white/60"}`
+          : `border-2 border-white/90 shadow-xl ${dragging ? "ring-4 ring-brand/50" : ""}`
+      }`}
+      style={{
+        width: bw || `${OVERLAY_SIZE[o.size] * 100}%`,
+        height: bh || undefined,
+        aspectRatio: box.w ? undefined : String(overlayAspect(o.shape)),
+        left,
+        top,
+        borderRadius: o.shape === "circle" ? "9999px" : o.shape === "rounded" ? "8%" : "0",
+        visibility: box.w ? "visible" : "hidden",
+      }}
+    >
+      {stream && <LiveVideo stream={stream} mirror={o.mirror} fit="cover" className="pointer-events-none h-full w-full" />}
+      <span
+        className={`pointer-events-none absolute inset-x-0 bottom-1 mx-auto w-fit rounded-full bg-black/70 px-2 py-0.5 text-[10px] text-white transition ${
+          dragging ? "opacity-0" : "opacity-0 group-hover:opacity-100"
+        }`}
+      >
+        ✋ Drag
+      </span>
     </div>
   );
 }

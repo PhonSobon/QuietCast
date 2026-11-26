@@ -10,13 +10,14 @@
  */
 
 export type Mode = "screen" | "camera" | "screen_camera";
-export type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 export type Resolution = "720p" | "1080p" | "1440p";
 export type DisplaySurface = "any" | "monitor" | "window" | "browser";
 
 export interface OverlayOptions {
   visible: boolean;
-  position: Corner;
+  /** Centre of the camera bubble, as a fraction of the frame (0..1). Drag to move. */
+  x: number;
+  y: number;
   size: "small" | "medium" | "large";
   shape: "circle" | "rounded" | "square";
   mirror: boolean;
@@ -50,7 +51,12 @@ export const RESOLUTIONS: Record<Resolution, { w: number; h: number; bitrate: nu
   "1440p": { w: 2560, h: 1440, bitrate: 14_000_000 },
 };
 
-const OVERLAY_SIZE = { small: 0.16, medium: 0.22, large: 0.3 } as const;
+/** Camera bubble width as a fraction of the frame width. */
+export const OVERLAY_SIZE = { small: 0.16, medium: 0.22, large: 0.3 } as const;
+
+export function overlayAspect(shape: OverlayOptions["shape"]): number {
+  return shape === "rounded" ? 4 / 3 : 1;
+}
 
 export interface FormatOption {
   id: "webm" | "mp4";
@@ -309,12 +315,12 @@ export class RecordingSession {
       ctx.drawImage(sv, (W - dw) / 2, (H - dh) / 2, dw, dh);
 
       if (cv && cv.videoWidth && o.visible) {
-        const aspect = o.shape === "rounded" ? 4 / 3 : 1;
+        const aspect = overlayAspect(o.shape);
         const w = Math.round(W * OVERLAY_SIZE[o.size]);
         const h = Math.round(w / aspect);
-        const m = Math.round(Math.min(W, H) * 0.03);
-        const x = o.position.endsWith("left") ? m : W - w - m;
-        const y = o.position.startsWith("top") ? m : H - h - m;
+        // free position (centre), kept fully inside the frame
+        const x = Math.round(Math.min(Math.max(o.x * W - w / 2, 0), W - w));
+        const y = Math.round(Math.min(Math.max(o.y * H - h / 2, 0), H - h));
 
         ctx.save();
         ctx.beginPath();

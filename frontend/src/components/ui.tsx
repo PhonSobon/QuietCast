@@ -76,6 +76,46 @@ export function Section({ title, children }: { title: string; children: ReactNod
   );
 }
 
+/** Compact one-line setting: label on the left, control on the right. */
+export function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="shrink-0 text-sm text-gray-300">{label}</span>
+      <div className="w-full max-w-[190px]">{children}</div>
+    </div>
+  );
+}
+
+export function Tabs<T extends string>({
+  value,
+  tabs,
+  onChange,
+}: {
+  value: T;
+  tabs: { id: T; label: string; badge?: boolean }[];
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div role="tablist" className="flex gap-1 border-b border-white/10 px-2">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          role="tab"
+          type="button"
+          aria-selected={t.id === value}
+          onClick={() => onChange(t.id)}
+          className={`relative -mb-px flex-1 border-b-2 px-2 py-2.5 text-sm font-medium transition ${
+            t.id === value ? "border-brand text-white" : "border-transparent text-gray-400 hover:text-gray-200"
+          }`}
+        >
+          {t.label}
+          {t.badge && <span className="absolute right-1.5 top-2 h-1.5 w-1.5 rounded-full bg-emerald-400" />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
