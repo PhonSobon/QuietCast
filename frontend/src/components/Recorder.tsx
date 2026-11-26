@@ -44,6 +44,7 @@ export default function Recorder() {
   const [result, setResult] = useState<ReviewResult | null>(null);
   const [saved, setSaved] = useState(false);
   const [denoiser, setDenoiser] = useState<Health["denoiser"] | null>(null);
+  const [transcriber, setTranscriber] = useState<Health["transcriber"] | null>(null);
   const [liveAspect, setLiveAspect] = useState(16 / 9);
   const [tab, setTab] = useState<Tab>("video");
 
@@ -64,8 +65,14 @@ export default function Recorder() {
   // Is the AI noise-removal (RE-USE) service available on the backend?
   useEffect(() => {
     health()
-      .then((h) => setDenoiser(h.denoiser))
-      .catch(() => setDenoiser({ available: false, device: null, error: "Backend not reachable" }));
+      .then((h) => {
+        setDenoiser(h.denoiser);
+        setTranscriber(h.transcriber);
+      })
+      .catch(() => {
+        setDenoiser({ available: false, device: null, error: "Backend not reachable" });
+        setTranscriber({ available: false, languages: null, error: "Backend not reachable" });
+      });
   }, []);
 
   // Fall back to an available container if the saved one isn't supported
@@ -315,6 +322,8 @@ export default function Recorder() {
         autoUpload={settings.autoUpload}
         aiDenoise={settings.aiDenoise && !!denoiser?.available}
         denoiserAvailable={!!denoiser?.available}
+        autoTranscribe={settings.autoTranscribe && !!transcriber?.available}
+        transcriberAvailable={!!transcriber?.available}
         onSaved={() => setSaved(true)}
         onDone={resetToSetup}
       />
@@ -418,7 +427,11 @@ export default function Recorder() {
           tabs={[
             { id: "video", label: "Video" },
             ...(usesCamera ? [{ id: "camera" as Tab, label: "Camera" }] : []),
-            { id: "audio", label: "Audio", badge: settings.aiDenoise && !!denoiser?.available },
+            {
+              id: "audio",
+              label: "Audio",
+              badge: (settings.aiDenoise && !!denoiser?.available) || (settings.autoTranscribe && !!transcriber?.available),
+            },
             { id: "more", label: "More" },
           ]}
         />
@@ -593,6 +606,22 @@ export default function Recorder() {
                     : denoiser.available
                       ? `● Ready${denoiser.device ? ` on ${denoiser.device}` : ""}`
                       : `○ Unavailable: ${denoiser.error ?? "unknown error"}`}
+                </p>
+              </div>
+              <div className="space-y-1.5 border-t border-white/10 pt-3">
+                <Toggle
+                  label="📝 Subtitles (speech to text)"
+                  hint="Khmer, English or both. Made after saving; searchable in the library."
+                  checked={settings.autoTranscribe}
+                  disabled={!transcriber?.available}
+                  onChange={(autoTranscribe) => update({ autoTranscribe })}
+                />
+                <p className={`text-xs ${transcriber?.available ? "text-emerald-400" : "text-amber-300/80"}`}>
+                  {transcriber === null
+                    ? "Checking speech-to-text service…"
+                    : transcriber.available
+                      ? "● Ready (Sota ASR, Khmer + English)"
+                      : `○ Unavailable: ${transcriber.error ?? "unknown error"}`}
                 </p>
               </div>
             </>

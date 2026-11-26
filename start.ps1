@@ -1,4 +1,4 @@
-# Starts the AI denoiser, the FastAPI backend and the Next.js frontend in three new windows.
+# Starts the AI denoiser, the speech-to-text service, the FastAPI backend and the Next.js frontend.
 $root = $PSScriptRoot
 
 # ---- AI denoiser (NVIDIA RE-USE on CPU) ----
@@ -13,6 +13,19 @@ if (-not (Test-Path $dpy)) {
 if (-not (Test-Path (Join-Path $denoiser "model\model.safetensors"))) {
     Write-Host "Downloading the RE-USE model into denoiser\model ..."
     & $dpy (Join-Path $denoiser "download_model.py")
+}
+
+# ---- speech to text (Sota ASR Khmer, ONNX) ----
+$transcriber = Join-Path $root "transcriber"
+$tpy = Join-Path $transcriber ".venv\Scripts\python.exe"
+if (-not (Test-Path $tpy)) {
+    Write-Host "Setting up the speech-to-text environment (one time)..."
+    python -m venv (Join-Path $transcriber ".venv")
+    & $tpy -m pip install -r (Join-Path $transcriber "requirements.txt")
+}
+if (-not (Test-Path (Join-Path $transcriber "model\encoder.int8.onnx"))) {
+    Write-Host "Downloading the Khmer speech-to-text model into transcriber\model (needs HF_TOKEN in .env) ..."
+    & $tpy (Join-Path $transcriber "download_model.py")
 }
 
 # ---- backend ----
@@ -31,9 +44,15 @@ if (-not (Test-Path (Join-Path $frontend "node_modules"))) {
 }
 
 Start-Process powershell -WorkingDirectory $denoiser -ArgumentList "-NoExit", "-Command", ".\.venv\Scripts\python.exe -m uvicorn app:app --port 8001"
+if (Test-Path (Join-Path $transcriber "model\encoder.int8.onnx")) {
+    Start-Process powershell -WorkingDirectory $transcriber -ArgumentList "-NoExit", "-Command", ".\.venv\Scripts\python.exe -m uvicorn app:app --port 8002"
+} else {
+    Write-Host "Speech to text is off: add HF_TOKEN to .env and run start.ps1 again." -ForegroundColor Yellow
+}
 Start-Process powershell -WorkingDirectory $backend -ArgumentList "-NoExit", "-Command", ".\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000"
 Start-Process powershell -WorkingDirectory $frontend -ArgumentList "-NoExit", "-Command", "npm run dev"
 
 Write-Host "AI denoiser: http://localhost:8001/health"
+Write-Host "Subtitles:   http://localhost:8002/health"
 Write-Host "Backend:     http://localhost:8000/docs"
 Write-Host "Frontend:    http://localhost:3000"

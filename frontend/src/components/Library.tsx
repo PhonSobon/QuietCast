@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type Caption,
   type Recording,
+  captionsUrl,
   convertRecording,
   deleteRecording,
   denoiseRecording,
@@ -13,6 +15,8 @@ import {
   listRecordings,
   renameRecording,
   thumbnailUrl,
+  getTranscript,
+  transcribeRecording,
 } from "@/lib/api";
 import { formatBytes, formatDate, formatDuration } from "@/lib/format";
 import SeekableVideo from "./SeekableVideo";
@@ -26,6 +30,7 @@ export default function Library() {
   const [query, setQuery] = useState("");
   const [ffmpeg, setFfmpeg] = useState(false);
   const [denoiserOk, setDenoiserOk] = useState(false);
+  const [transcriberOk, setTranscriberOk] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
 
   const load = useCallback(async (q: string) => {
@@ -48,6 +53,7 @@ export default function Library() {
       .then((h) => {
         setFfmpeg(h.ffmpeg);
         setDenoiserOk(h.denoiser.available);
+        setTranscriberOk(h.transcriber.available);
       })
       .catch(() => {});
   }, []);
@@ -59,7 +65,9 @@ export default function Library() {
 
   // refresh items whose thumbnail / conversion is still pending
   useEffect(() => {
-    const pending = items.filter((r) => r.convert_status === "processing" || r.denoise_status === "processing");
+    const pending = items.filter(
+      (r) => r.convert_status === "processing" || r.denoise_status === "processing" || r.transcript_status === "processing",
+    );
     if (!pending.length) return;
     const t = setInterval(async () => {
       const updated = await Promise.all(pending.map((r) => getRecording(r.id).catch(() => r)));
@@ -84,7 +92,7 @@ export default function Library() {
         <div className="flex w-full gap-2 sm:w-auto">
           <input
             className="select sm:w-64"
-            placeholder="Search by title…"
+            placeholder="Search titles and transcripts…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -122,6 +130,7 @@ export default function Library() {
           rec={open}
           ffmpeg={ffmpeg}
           denoiserOk={denoiserOk}
+          transcriberOk={transcriberOk}
           onClose={() => setOpenId(null)}
           onChange={replace}
           onDelete={(id) => {
@@ -159,6 +168,12 @@ function Card({ rec, onOpen }: { rec: Recording; onOpen: () => void }) {
         {rec.denoise_status === "processing" && (
           <span className="absolute right-2 top-2 rounded bg-black/75 px-1.5 py-0.5 text-xs">Removing noise…</span>
         )}
+        {rec.has_transcript && (
+          <span className="absolute bottom-2 left-2 rounded bg-black/75 px-1.5 py-0.5 text-xs font-semibold">CC</span>
+        )}
+        {rec.transcript_status === "processing" && (
+          <span className="absolute bottom-2 left-2 rounded bg-black/75 px-1.5 py-0.5 text-xs">Subtitles…</span>
+        )}
         <div className="absolute inset-0 grid place-items-center bg-black/40 opacity-0 transition group-hover:opacity-100">
           <span className="grid h-12 w-12 place-items-center rounded-full bg-white/90 pl-1 text-xl text-black">▶</span>
         </div>
@@ -177,6 +192,7 @@ function PlayerModal({
   rec,
   ffmpeg,
   denoiserOk,
+  transcriberOk,
   onClose,
   onChange,
   onDelete,
@@ -184,6 +200,7 @@ function PlayerModal({
   rec: Recording;
   ffmpeg: boolean;
   denoiserOk: boolean;
+  transcriberOk: boolean;
   onClose: () => void;
   onChange: (r: Recording) => void;
   onDelete: (id: string) => void;
@@ -198,6 +215,27 @@ function PlayerModal({
     if (rec.has_denoised) setVersion("denoised");
   }, [rec.has_denoised]);
   const playing = version === "denoised" && rec.has_denoised ? "denoised" : "original";
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [captions, setCaptions] = useState<Caption[] | null>(null);
+  const [now, setNow] = useState(0);
+  const [showSubs, setShowSubs] = useState(true);
+  // cache-buster for the subtitles file: changes each time a (new) transcript becomes available
+  const captionsVersion = useMemo(() => (rec.has_transcript ? Date.now().toString(36) : ""), [rec.has_transcript]);
+
+  // load the transcript once it exists (and again after "Run again")
+  useEffect(() => {
+    if (!rec.has_transcript) {
+      setCaptions(null);
+      return;
+    }
+    let alive = true;
+    getTranscript(rec.id)
+      .then((t) => alive && setCaptions(t.captions))
+      .catch(() => alive && setCaptions([]));
+    return () => {
+      alive = false;
+    };
+  }, [rec.id, rec.has_transcript, rec.transcript_status]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -235,6 +273,13 @@ function PlayerModal({
 
   const convert = () => run(async () => onChange(await convertRecording(rec.id)));
   const denoise = () => run(async () => onChange(await denoiseRecording(rec.id)));
+  const transcribe = () => run(async () => onChange(await transcribeRecording(rec.id)));
+  const seek = (t: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = t;
+    void v.play().catch(() => {});
+  };
 
   return (
     <div
@@ -243,12 +288,22 @@ function PlayerModal({
       role="dialog"
       aria-modal="true"
     >
-      <div className="card w-full max-w-4xl overflow-hidden bg-[#0f1219]" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="card max-h-[94vh] w-full max-w-4xl overflow-y-auto bg-[#0f1219]"
+        onClick={(e) => e.stopPropagation()}
+      >
         <SeekableVideo
           key={playing}
           src={fileUrl(rec.id, playing === "denoised" ? { format: "denoised" } : {})}
           autoPlay
-          className="max-h-[65vh] w-full"
+          className="max-h-[60vh] w-full"
+          videoRef={videoRef}
+          onTime={setNow}
+          subtitles={
+            showSubs && rec.has_transcript
+              ? { src: captionsUrl(rec.id, "vtt", false, captionsVersion), label: "Khmer / English", srclang: "km" }
+              : null
+          }
         />
         <div className="space-y-4 p-5">
           <div className="flex items-start justify-between gap-3">
@@ -331,6 +386,78 @@ function PlayerModal({
             )}
             {rec.denoise_status === "failed" && rec.denoise_error && (
               <span className="w-full text-xs text-red-300">Failed: {rec.denoise_error}</span>
+            )}
+          </div>
+
+          {/* Speech to text / subtitles (Sota ASR Khmer) */}
+          <div className="space-y-3 rounded-lg bg-white/[0.04] px-3 py-2.5 text-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-medium">📝 Subtitles</span>
+              {rec.transcript_status === "processing" ? (
+                <span className="flex items-center gap-2 text-gray-300">
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                  Converting speech to text…
+                </span>
+              ) : (
+                <button
+                  className="btn btn-secondary py-1.5"
+                  onClick={transcribe}
+                  disabled={busy || !transcriberOk}
+                  title={transcriberOk ? "Speech to text (Khmer / English)" : "The speech-to-text service is not running"}
+                >
+                  {rec.has_transcript ? "Run again" : rec.transcript_status === "failed" ? "Retry" : "Make subtitles"}
+                </button>
+              )}
+              {rec.has_transcript && (
+                <>
+                  <label className="flex cursor-pointer items-center gap-1.5 text-gray-300">
+                    <input
+                      type="checkbox"
+                      className="accent-[var(--color-brand)]"
+                      checked={showSubs}
+                      onChange={(e) => setShowSubs(e.target.checked)}
+                    />
+                    Show on video
+                  </label>
+                  <div className="ml-auto flex gap-1.5">
+                    {(["srt", "vtt", "txt"] as const).map((f) => (
+                      <a key={f} className="btn btn-secondary px-2.5 py-1.5 text-xs" href={captionsUrl(rec.id, f, true)}>
+                        ⬇ {f.toUpperCase()}
+                      </a>
+                    ))}
+                  </div>
+                </>
+              )}
+              {!transcriberOk && rec.transcript_status !== "processing" && !rec.has_transcript && (
+                <span className="text-xs text-gray-500">Speech-to-text service not running</span>
+              )}
+              {rec.transcript_status === "failed" && rec.transcript_error && (
+                <span className="w-full text-xs text-red-300">Failed: {rec.transcript_error}</span>
+              )}
+            </div>
+
+            {rec.has_transcript && captions && (
+              <ol className="max-h-56 space-y-0.5 overflow-y-auto pr-1">
+                {captions.length === 0 && <li className="text-xs text-gray-500">No speech was detected.</li>}
+                {captions.map((c, i) => {
+                  const active = now >= c.start && now < c.end;
+                  return (
+                    <li key={i}>
+                      <button
+                        onClick={() => seek(c.start)}
+                        className={`flex w-full gap-3 rounded-md px-2 py-1 text-left transition ${
+                          active ? "bg-brand/15 text-white" : "text-gray-300 hover:bg-white/5"
+                        }`}
+                      >
+                        <span className="shrink-0 font-mono text-xs leading-6 text-gray-500">
+                          {formatDuration(c.start)}
+                        </span>
+                        <span className="khmer leading-6">{c.text}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
             )}
           </div>
 

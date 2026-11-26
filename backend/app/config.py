@@ -6,6 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 STORAGE_DIR = Path(os.getenv("STORAGE_DIR", BASE_DIR / "storage"))
 VIDEOS_DIR = STORAGE_DIR / "videos"
 THUMBS_DIR = STORAGE_DIR / "thumbnails"
+CAPTIONS_DIR = STORAGE_DIR / "captions"
 DB_PATH = STORAGE_DIR / "recordings.db"
 
 # Comma-separated list of allowed frontend origins
@@ -22,5 +23,9 @@ FFMPEG = os.getenv("FFMPEG_PATH") or shutil.which("ffmpeg")
 DENOISER_URL = os.getenv("DENOISER_URL", "http://localhost:8001").rstrip("/")
 DENOISER_TIMEOUT_SEC = float(os.getenv("DENOISER_TIMEOUT_SEC", "3600"))
 
-for d in (VIDEOS_DIR, THUMBS_DIR):
+# Speech-to-text service (Sota ASR Khmer, see ../transcriber). Empty string disables it.
+TRANSCRIBER_URL = os.getenv("TRANSCRIBER_URL", "http://localhost:8002").rstrip("/")
+TRANSCRIBER_TIMEOUT_SEC = float(os.getenv("TRANSCRIBER_TIMEOUT_SEC", "1800"))
+
+for d in (VIDEOS_DIR, THUMBS_DIR, CAPTIONS_DIR):
     d.mkdir(parents=True, exist_ok=True)

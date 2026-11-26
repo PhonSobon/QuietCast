@@ -8,6 +8,7 @@ export interface Health {
   status: string;
   ffmpeg: boolean;
   denoiser: { available: boolean; device: string | null; error: string | null };
+  transcriber: { available: boolean; languages: string[] | null; error: string | null };
 }
 
 export interface Recording {
@@ -25,6 +26,9 @@ export interface Recording {
   has_denoised: boolean;
   denoise_status: JobStatus;
   denoise_error: string | null;
+  has_transcript: boolean;
+  transcript_status: JobStatus;
+  transcript_error: string | null;
   created_at: string;
 }
 
@@ -77,6 +81,34 @@ export function denoiseRecording(id: string) {
   return request<Recording>(`/api/recordings/${id}/denoise`, { method: "POST" });
 }
 
+/** Speech to text (Khmer / English) with Sota ASR; makes subtitles (server-side, async). */
+export function transcribeRecording(id: string) {
+  return request<Recording>(`/api/recordings/${id}/transcribe`, { method: "POST" });
+}
+
+export interface Caption {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface Transcript {
+  text: string;
+  seconds: number;
+  captions: Caption[];
+}
+
+export function getTranscript(id: string) {
+  return request<Transcript>(`/api/recordings/${id}/transcript`);
+}
+
+export function captionsUrl(id: string, format: "vtt" | "srt" | "txt" = "vtt", download = false, version = "") {
+  const p = new URLSearchParams({ format });
+  if (download) p.set("download", "true");
+  if (version) p.set("v", version);
+  return `${API_URL}/api/recordings/${id}/captions?${p}`;
+}
+
 export function fileUrl(id: string, opts: { format?: "original" | "mp4" | "denoised"; download?: boolean } = {}) {
   const p = new URLSearchParams();
   if (opts.format) p.set("format", opts.format);
@@ -97,6 +129,8 @@ export interface UploadMeta {
   height?: number;
   /** Run AI noise removal after upload */
   denoise?: boolean;
+  /** Make subtitles (speech to text) after upload */
+  transcribe?: boolean;
 }
 
 /** Upload with progress reporting (fetch has no upload progress, so use XHR). */
@@ -116,6 +150,7 @@ export function uploadRecording(
     if (meta.width) form.append("width", String(meta.width));
     if (meta.height) form.append("height", String(meta.height));
     if (meta.denoise) form.append("denoise", "true");
+    if (meta.transcribe) form.append("transcribe", "true");
 
     xhr.open("POST", `${API_URL}/api/recordings`);
     xhr.upload.onprogress = (e) => {

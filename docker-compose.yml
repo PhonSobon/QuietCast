@@ -1,8 +1,53 @@
+# QuietCast: run everything with Docker
+#
+#   cp .env.example .env        # add HF_TOKEN=hf_... for the speech-to-text model
+#   docker compose up --build   # then open http://localhost:3300
+#
+# Models are NOT baked into images. They live in ./denoiser/model and ./transcriber/model
+# (mounted into the containers) and are downloaded on first start if missing.
+
 services:
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # The browser calls the API directly, so this must be reachable from the user's machine
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8300}
+    ports:
+      - "${FRONTEND_PORT:-3300}:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    ports:
+      - "${BACKEND_PORT:-8300}:8000"
+    environment:
+      STORAGE_DIR: /data
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3300,http://127.0.0.1:3300}
+      DENOISER_URL: http://denoiser:8001
+      TRANSCRIBER_URL: http://transcriber:8002
+    volumes:
+      - ${STORAGE_PATH:-./backend/storage}:/data   # recordings, thumbnails, subtitles, database
+    restart: unless-stopped
+
   denoiser:
     build: ./denoiser
     ports:
-      - "8001:8001"
+      - "127.0.0.1:${DENOISER_PORT:-8301}:8001"   # only for health checks; the backend uses the internal network
     environment:
-      SAMPLE_RATE: "16000"
+      SAMPLE_RATE: ${DENOISE_SAMPLE_RATE:-16000}
+    volumes:
+      - ./denoiser/model:/app/model      # NVIDIA RE-USE (downloaded on first start)
+    restart: unless-stopped
+
+  transcriber:
+    build: ./transcriber
+    ports:
+      - "127.0.0.1:${TRANSCRIBER_PORT:-8302}:8002"
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}            # read from .env; only used to download the model once
+    volumes:
+      - ./transcriber/model:/app/model   # Sota ASR Khmer (personal/research license - never bake into images)
     restart: unless-stopped

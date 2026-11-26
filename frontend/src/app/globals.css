@@ -14,6 +14,16 @@ body {
   color: #e5e7eb;
 }
 
+/* Khmer text: transcript lines and on-video subtitles */
+.khmer,
+video::cue {
+  font-family: "Noto Sans Khmer", "Khmer OS Siemreap", "Leelawadee UI", "Khmer UI", system-ui, sans-serif;
+}
+video::cue {
+  background: rgba(0, 0, 0, 0.75);
+  line-height: 1.5;
+}
+
 .card {
   @apply rounded-2xl border border-white/10 bg-white/[0.03];
 }

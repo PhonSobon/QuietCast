@@ -10,9 +10,34 @@ library on the server.
 QuietCast/
 ├── frontend/   Next.js 16 + React 19 + Tailwind: recording UI and library
 ├── backend/    FastAPI + SQLite: storage, streaming, thumbnails, MP4 conversion (ffmpeg)
-└── denoiser/   AI noise removal: NVIDIA NemotronLabs RE-USE running on the CPU
-    └── model/  the downloaded model (weights + code + license), kept locally
+├── denoiser/   AI noise removal: NVIDIA NemotronLabs RE-USE running on the CPU
+│   └── model/  the downloaded model (weights + code + license), kept locally
+└── transcriber/ Speech to text / subtitles: Sota ASR Khmer (ONNX, CPU)
+    └── model/  the downloaded model (needs your HF_TOKEN), kept locally
 ```
+
+## Subtitles: speech to text (Khmer + English)
+
+[Sota-ASR-Khmer-26M-ONNX](https://huggingface.co/muyleanging/Sota-ASR-Khmer-26M-ONNX) turns speech into text.
+It handles Khmer, English and both mixed, with a start and end time for every word.
+
+- **Setup.** The model repository needs a Hugging Face token. Copy `.env.example` to `.env` and set
+  `HF_TOKEN=hf_...`. `start.ps1` (or `python transcriber/download_model.py`) downloads the model into
+  `transcriber/model/` once. `.env` and the model are git-ignored.
+- **Use it.**
+  - Turn on *Subtitles* in the record page's **Audio** tab, or tick *Make subtitles* when saving.
+  - Or press *Make subtitles* on any video in the library.
+- **What you get.**
+  - Subtitles on the video (toggle *Show on video*).
+  - A transcript where clicking a line jumps to that moment.
+  - SRT / VTT / TXT downloads.
+  - Library search also searches what was said.
+- **Clean audio first.** When noise removal is also on, the subtitles are made from the cleaned audio, which
+  is more accurate.
+- **Fast on CPU.** INT8 ONNX Runtime. About 10 s of speech takes about 2 s on a laptop.
+- **License (important).** The model is a *preview release* for **personal use, evaluation and research only**.
+  Do not redistribute the weights or use them in commercial products without the author's written permission
+  (`transcriber/model/LICENSE`). QuietCast's code is MIT, but that does not change the model's terms.
 
 ## AI noise removal (NVIDIA RE-USE, CPU)
 
@@ -69,7 +94,45 @@ speech-enhancement model. It removes background noise, echo/reverb, clipping and
 - [ffmpeg](https://ffmpeg.org/) on your PATH (optional; needed for thumbnails and MP4 conversion)
 - A desktop browser: Chrome or Edge recommended. Firefox works; Safari has limited screen/audio support.
 
-## Run it
+## Run with Docker (easiest)
+
+Needs [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows, macOS or Linux). No GPU needed.
+
+```bash
+cp .env.example .env          # Windows: copy .env.example .env
+# edit .env and set HF_TOKEN=hf_...   (only needed for subtitles)
+docker compose up --build -d
+```
+
+Open **http://localhost:3300**. The first start builds the images (several minutes) and downloads both AI
+models into `denoiser/model/` and `transcriber/model/`. Later starts take seconds.
+
+| Container | Port | What it does |
+|---|---|---|
+| `frontend` | 3300 | The web app |
+| `backend` | 8300 | API, storage, ffmpeg |
+| `denoiser` | 8301 (local only) | AI noise removal (NVIDIA RE-USE, CPU) |
+| `transcriber` | 8302 (local only) | Subtitles (Sota ASR Khmer, CPU) |
+
+- **Your recordings** are kept in `backend/storage/` on your disk (change with `STORAGE_PATH`), so they
+  survive `docker compose down` and image rebuilds.
+- **Models are mounted, not built into images.** That keeps images small, and the Khmer model's license
+  doesn't allow redistributing it.
+- **Useful commands:**
+
+  ```bash
+  docker compose logs -f backend       # follow logs
+  docker compose ps                    # status / health
+  docker compose down                  # stop everything
+  docker compose up --build -d         # rebuild after code changes
+  ```
+
+- **Ports:** Docker uses 3300 / 8300 / 8301 / 8302 so it does not clash with other projects or the non-Docker setup. To change them, set `FRONTEND_PORT`, `BACKEND_PORT`, `PUBLIC_API_URL`, `CORS_ORIGINS`, `DENOISER_PORT` and `TRANSCRIBER_PORT` in `.env` and rebuild. If you
+  started QuietCast with `start.ps1`, close those windows first.
+- **On a server:** set `PUBLIC_API_URL` to the address browsers will use (e.g. `https://api.example.com`) and
+  `CORS_ORIGINS` to the frontend address, then rebuild. Screen recording needs HTTPS.
+
+## Run it (without Docker)
 
 **Backend** (http://localhost:8000, API docs at http://localhost:8000/docs):
 
@@ -93,6 +156,17 @@ python download_model.py          # only if denoiser/model is missing
 uvicorn app:app --port 8001
 ```
 
+**Speech to text** (http://localhost:8002/health), optional. Needs `HF_TOKEN` in `.env`:
+
+```powershell
+cd transcriber
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+python download_model.py          # reads HF_TOKEN from ..\.env
+uvicorn app:app --port 8002
+```
+
 **Frontend** (http://localhost:3000):
 
 ```powershell
@@ -113,6 +187,8 @@ On Windows you can instead run `start.ps1` from the project root, which sets eve
 | backend env | `MAX_UPLOAD_MB` | `4096` | Max upload size |
 | backend env | `FFMPEG_PATH` | auto-detected | Path to ffmpeg |
 | backend env | `DENOISER_URL` | `http://localhost:8001` | AI denoiser service (empty string disables it) |
+| backend env | `TRANSCRIBER_URL` | `http://localhost:8002` | Speech-to-text service (empty string disables it) |
+| `.env` (project root) | `HF_TOKEN` | – | Hugging Face token, used once to download the speech-to-text model |
 | denoiser env | `SAMPLE_RATE` | `16000` | Processing rate (8000–48000). Higher is better quality but slower |
 | denoiser env | `THREADS` | CPU cores − 1 | CPU threads |
 | denoiser env | `CHUNK_SECONDS` / `OVERLAP_SECONDS` | `8` / `0.5` | Chunking for long audio |
@@ -132,8 +208,13 @@ On Windows you can instead run `start.ps1` from the project root, which sets eve
 | GET | `/api/recordings/{id}/thumbnail` | JPEG thumbnail |
 | POST | `/api/recordings/{id}/convert` | Start MP4 conversion in the background (uses the clean audio if available) |
 | POST | `/api/recordings/{id}/denoise` | Start AI noise removal in the background |
+| POST | `/api/recordings/{id}/transcribe` | Start speech to text (subtitles) in the background |
+| GET | `/api/recordings/{id}/captions?format=vtt\|srt\|txt&download=true` | Subtitles / transcript file |
+| GET | `/api/recordings/{id}/transcript` | Transcript JSON: text, caption lines and word timings |
 
-Upload also accepts `denoise=true` to start noise removal right away, and `/file?format=denoised` serves the clean version.
+Upload also accepts `denoise=true` and `transcribe=true` to start those jobs right away (with both, the
+subtitles are made from the cleaned audio). `/file?format=denoised` serves the clean version, and `?q=`
+searches titles and transcripts.
 
 ## Notes
 

@@ -20,6 +20,8 @@ export default function ReviewPanel({
   autoUpload,
   aiDenoise,
   denoiserAvailable,
+  autoTranscribe,
+  transcriberAvailable,
   onSaved,
   onDone,
 }: {
@@ -27,6 +29,8 @@ export default function ReviewPanel({
   autoUpload: boolean;
   aiDenoise: boolean;
   denoiserAvailable: boolean;
+  autoTranscribe: boolean;
+  transcriberAvailable: boolean;
   onSaved: () => void;
   onDone: () => void;
 }) {
@@ -34,6 +38,7 @@ export default function ReviewPanel({
   const [upload, setUpload] = useState<UploadState>({ status: "idle" });
   const [downloaded, setDownloaded] = useState(false);
   const [denoise, setDenoise] = useState(aiDenoise);
+  const [transcribe, setTranscribe] = useState(autoTranscribe);
   const abortRef = useRef<(() => void) | null>(null);
   const autoStarted = useRef(false);
 
@@ -51,6 +56,7 @@ export default function ReviewPanel({
         width: result.width,
         height: result.height,
         denoise,
+        transcribe,
       },
       (progress) => setUpload({ status: "uploading", progress }),
     );
@@ -64,7 +70,7 @@ export default function ReviewPanel({
     } finally {
       abortRef.current = null;
     }
-  }, [result, title, denoise, onSaved]);
+  }, [result, title, denoise, transcribe, onSaved]);
 
   useEffect(() => {
     if (autoUpload && !autoStarted.current) {
@@ -148,8 +154,29 @@ export default function ReviewPanel({
                   </span>
                 </span>
               </label>
+              <label
+                className={`flex items-start gap-2 rounded-lg bg-white/[0.04] px-3 py-2 text-sm ${
+                  transcriberAvailable ? "cursor-pointer" : "opacity-50"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="mt-0.5 accent-[var(--color-brand)]"
+                  checked={transcribe}
+                  disabled={!transcriberAvailable}
+                  onChange={(e) => setTranscribe(e.target.checked)}
+                />
+                <span>
+                  Make subtitles (Khmer / English)
+                  <span className="block text-xs text-gray-500">
+                    {transcriberAvailable
+                      ? "Speech to text on the server; uses the clean audio when noise removal is on."
+                      : "Speech-to-text service is not running."}
+                  </span>
+                </span>
+              </label>
               <button className="btn btn-primary w-full" onClick={save}>
-                ☁ Save to library{denoise ? " + remove noise" : ""}
+                ☁ Save to library
               </button>
             </>
           )}
@@ -172,7 +199,8 @@ export default function ReviewPanel({
           {upload.status === "done" && (
             <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
               Saved to library.
-              {upload.recording.denoise_status === "processing" && " AI noise removal is running…"}{" "}
+              {upload.recording.denoise_status === "processing" && " AI noise removal is running…"}
+              {upload.recording.transcript_status === "processing" && " Making subtitles…"}{" "}
               <Link href="/library" className="underline">
                 Open library →
               </Link>

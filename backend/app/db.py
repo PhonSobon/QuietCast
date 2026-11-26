@@ -27,6 +27,9 @@ EXTRA_COLUMNS = {
     "denoised_filename": "TEXT",
     "denoise_status": "TEXT NOT NULL DEFAULT 'none'",
     "denoise_error": "TEXT",
+    "transcript_status": "TEXT NOT NULL DEFAULT 'none'",
+    "transcript_error": "TEXT",
+    "transcript_text": "TEXT",
 }
 
 
@@ -44,6 +47,10 @@ def init_db() -> None:
         conn.execute(
             "UPDATE recordings SET denoise_status = 'failed', denoise_error = 'Interrupted by server restart' "
             "WHERE denoise_status = 'processing'"
+        )
+        conn.execute(
+            "UPDATE recordings SET transcript_status = 'failed', transcript_error = 'Interrupted by server restart' "
+            "WHERE transcript_status = 'processing'"
         )
 
 

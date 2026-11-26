@@ -10,9 +10,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .config import CORS_ORIGINS, DENOISER_URL, FFMPEG, MAX_UPLOAD_MB, THUMBS_DIR, VIDEOS_DIR
+from .config import CORS_ORIGINS, DENOISER_URL, FFMPEG, MAX_UPLOAD_MB, THUMBS_DIR, TRANSCRIBER_URL, VIDEOS_DIR
 from .db import connect, init_db, row_to_dict
-from .media import convert_to_mp4, denoise_recording, denoiser_health, make_thumbnail
+from .media import (
+    captions_path,
+    convert_to_mp4,
+    denoise_recording,
+    denoise_then_transcribe,
+    denoiser_health,
+    make_thumbnail,
+    remove_captions,
+    transcribe_recording,
+    transcriber_health,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -51,6 +61,9 @@ class Recording(BaseModel):
     has_denoised: bool
     denoise_status: str
     denoise_error: str | None
+    has_transcript: bool
+    transcript_status: str
+    transcript_error: str | None
     created_at: str
 
 
@@ -74,6 +87,9 @@ def _serialize(row: dict) -> Recording:
         has_denoised=bool(row.get("denoised_filename")),
         denoise_status=row.get("denoise_status") or "none",
         denoise_error=row.get("denoise_error"),
+        has_transcript=(row.get("transcript_status") or "none") == "done",
+        transcript_status=row.get("transcript_status") or "none",
+        transcript_error=row.get("transcript_error"),
         created_at=row["created_at"],
     )
 
@@ -93,10 +109,12 @@ def _safe_name(title: str) -> str:
 @app.get("/api/health")
 def health() -> dict:
     den = denoiser_health()
+    tr = transcriber_health()
     return {
         "status": "ok",
         "ffmpeg": bool(FFMPEG),
         "denoiser": {"available": bool(den.get("ok")) and bool(FFMPEG), "device": den.get("device"), "error": den.get("error")},
+        "transcriber": {"available": bool(tr.get("ok")) and bool(FFMPEG), "languages": tr.get("languages"), "error": tr.get("error")},
     }
 
 
@@ -108,12 +126,19 @@ def _start_denoise(rec_id: str, filename: str, background: BackgroundTasks) -> N
     background.add_task(denoise_recording, rec_id, filename)
 
 
+def _mark_transcribing(rec_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE recordings SET transcript_status = 'processing', transcript_error = NULL WHERE id = ?", (rec_id,)
+        )
+
+
 @app.get("/api/recordings", response_model=list[Recording])
 def list_recordings(q: str | None = None) -> list[Recording]:
     sql, params = "SELECT * FROM recordings", []
     if q:
-        sql += " WHERE title LIKE ?"
-        params.append(f"%{q}%")
+        sql += " WHERE title LIKE ? OR transcript_text LIKE ?"  # search inside transcripts too
+        params += [f"%{q}%", f"%{q}%"]
     sql += " ORDER BY created_at DESC"
     with connect() as conn:
         rows = conn.execute(sql, params).fetchall()
@@ -130,6 +155,7 @@ async def upload_recording(
     width: int | None = Form(None),
     height: int | None = Form(None),
     denoise: bool = Form(False),
+    transcribe: bool = Form(False),
 ) -> Recording:
     mime = (file.content_type or "").split(";")[0].strip().lower()
     if mime not in ALLOWED_TYPES:
@@ -168,6 +194,7 @@ async def upload_recording(
         "mp4_filename": filename if mime == "video/mp4" else None,
         "convert_status": "done" if mime == "video/mp4" else "none",
         "denoise_status": "none",
+        "transcript_status": "none",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     cols = ", ".join(row)
@@ -175,9 +202,22 @@ async def upload_recording(
     with connect() as conn:
         conn.execute(f"INSERT INTO recordings ({cols}) VALUES ({marks})", tuple(row.values()))
     background.add_task(make_thumbnail, rec_id, filename)
-    if denoise and DENOISER_URL and FFMPEG:
+    want_denoise = denoise and bool(DENOISER_URL) and bool(FFMPEG)
+    want_transcript = transcribe and bool(TRANSCRIBER_URL) and bool(FFMPEG)
+    if want_denoise and want_transcript:
+        # transcribe the clean audio once noise removal is done
+        with connect() as conn:
+            conn.execute("UPDATE recordings SET denoise_status = 'processing' WHERE id = ?", (rec_id,))
+        _mark_transcribing(rec_id)
+        background.add_task(denoise_then_transcribe, rec_id, filename)
+        row["denoise_status"] = row["transcript_status"] = "processing"
+    elif want_denoise:
         _start_denoise(rec_id, filename, background)
         row["denoise_status"] = "processing"
+    elif want_transcript:
+        _mark_transcribing(rec_id)
+        background.add_task(transcribe_recording, rec_id)
+        row["transcript_status"] = "processing"
     return _serialize(row)
 
 
@@ -202,6 +242,7 @@ def delete_recording(rec_id: str) -> None:
         if extra:
             (VIDEOS_DIR / extra).unlink(missing_ok=True)
     (THUMBS_DIR / f"{rec_id}.jpg").unlink(missing_ok=True)
+    remove_captions(rec_id)
     with connect() as conn:
         conn.execute("DELETE FROM recordings WHERE id = ?", (rec_id,))
 
@@ -266,3 +307,44 @@ def denoise(rec_id: str, background: BackgroundTasks) -> Recording:
         return _serialize(row)
     _start_denoise(rec_id, row["filename"], background)
     return _serialize(_get_row(rec_id))
+
+
+@app.post("/api/recordings/{rec_id}/transcribe", response_model=Recording)
+def transcribe(rec_id: str, background: BackgroundTasks) -> Recording:
+    """Speech to text (Khmer, English, mixed) with Sota ASR; makes subtitles. Runs in the background."""
+    if not FFMPEG:
+        raise HTTPException(501, "ffmpeg is not installed on the server")
+    if not TRANSCRIBER_URL:
+        raise HTTPException(501, "Speech to text is disabled (TRANSCRIBER_URL is empty)")
+    row = _get_row(rec_id)
+    if row["transcript_status"] == "processing":
+        return _serialize(row)
+    _mark_transcribing(rec_id)
+    background.add_task(transcribe_recording, rec_id)
+    return _serialize(_get_row(rec_id))
+
+
+@app.get("/api/recordings/{rec_id}/transcript")
+def get_transcript(rec_id: str):
+    """Full transcript: text, caption lines with times, and word timings."""
+    _get_row(rec_id)
+    path = captions_path(rec_id, "json")
+    if not path.exists():
+        raise HTTPException(404, "No transcript yet")
+    return FileResponse(path, media_type="application/json")
+
+
+@app.get("/api/recordings/{rec_id}/captions")
+def get_captions(rec_id: str, format: Literal["vtt", "srt", "txt"] = "vtt", download: bool = False):
+    """Subtitles as WebVTT (for the player), SRT (for YouTube / editors) or plain text."""
+    row = _get_row(rec_id)
+    path = captions_path(rec_id, format)
+    if not path.exists():
+        raise HTTPException(404, "No subtitles yet")
+    media = {"vtt": "text/vtt", "srt": "application/x-subrip", "txt": "text/plain"}[format]
+    return FileResponse(
+        path,
+        media_type=f"{media}; charset=utf-8",
+        filename=f"{_safe_name(row['title'])}.{format}",
+        content_disposition_type="attachment" if download else "inline",
+    )

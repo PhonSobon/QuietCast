@@ -23,6 +23,9 @@ backend/storage/
 # AI model: downloaded locally by denoiser/download_model.py (or start.ps1), not committed.
 # It is NVIDIA's work under the OpenMDW-1.1 license, see THIRD_PARTY_NOTICES.md.
 denoiser/model/
+# Speech-to-text model: downloaded with your own HF_TOKEN by transcriber/download_model.py.
+# Its license does not allow redistributing the weights, so never commit it.
+transcriber/model/
 
 # Editors / OS
 .vscode/

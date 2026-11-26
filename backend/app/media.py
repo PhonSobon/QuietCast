@@ -6,7 +6,18 @@ from pathlib import Path
 
 import httpx
 
-from .config import DENOISER_TIMEOUT_SEC, DENOISER_URL, FFMPEG, THUMBS_DIR, VIDEOS_DIR
+import json
+
+from .config import (
+    CAPTIONS_DIR,
+    DENOISER_TIMEOUT_SEC,
+    DENOISER_URL,
+    FFMPEG,
+    THUMBS_DIR,
+    TRANSCRIBER_TIMEOUT_SEC,
+    TRANSCRIBER_URL,
+    VIDEOS_DIR,
+)
 from .db import connect, row_to_dict
 
 log = logging.getLogger("media")
@@ -169,3 +180,109 @@ def denoise_recording(rec_id: str, filename: str) -> None:
                 "UPDATE recordings SET mp4_filename = NULL, convert_status = 'none' WHERE id = ?", (rec_id,)
             )
     _set_denoise(rec_id, "done", None, out_name)
+
+
+# ------------------------------------------------------------------ speech to text
+
+def transcriber_health() -> dict:
+    """Ask the Sota ASR transcriber service whether it is up and the model is loaded."""
+    if not TRANSCRIBER_URL:
+        return {"ok": False, "error": "Transcriber disabled (TRANSCRIBER_URL is empty)"}
+    try:
+        r = httpx.get(f"{TRANSCRIBER_URL}/health", timeout=3)
+        r.raise_for_status()
+        return r.json()
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"Transcriber service not reachable at {TRANSCRIBER_URL} ({type(exc).__name__})"}
+
+
+def _ts(sec: float, sep: str) -> str:
+    ms = int(round(max(0.0, sec) * 1000))
+    h, ms = divmod(ms, 3_600_000)
+    m, ms = divmod(ms, 60_000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d}{sep}{ms:03d}"
+
+
+def captions_path(rec_id: str, ext: str) -> Path:
+    return CAPTIONS_DIR / f"{rec_id}.{ext}"
+
+
+def _write_captions(rec_id: str, data: dict) -> None:
+    caps = data.get("captions", [])
+    srt = "".join(f"{i}\n{_ts(c['start'], ',')} --> {_ts(c['end'], ',')}\n{c['text']}\n\n" for i, c in enumerate(caps, 1))
+    vtt = "WEBVTT\n\n" + "".join(f"{_ts(c['start'], '.')} --> {_ts(c['end'], '.')}\n{c['text']}\n\n" for c in caps)
+    captions_path(rec_id, "srt").write_text(srt, encoding="utf-8")
+    captions_path(rec_id, "vtt").write_text(vtt, encoding="utf-8")
+    captions_path(rec_id, "txt").write_text(data.get("text", "") + "\n", encoding="utf-8")
+    captions_path(rec_id, "json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def _set_transcript(rec_id: str, status: str, error: str | None = None, text: str | None = None) -> None:
+    with connect() as conn:
+        if text is not None:
+            conn.execute(
+                "UPDATE recordings SET transcript_status = ?, transcript_error = ?, transcript_text = ? WHERE id = ?",
+                (status, error, text, rec_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE recordings SET transcript_status = ?, transcript_error = ? WHERE id = ?",
+                (status, error, rec_id),
+            )
+
+
+def transcribe_recording(rec_id: str) -> None:
+    """
+    Speech to text with Sota ASR (Khmer, English, mixed):
+      1. extract the audio (16 kHz mono WAV) - from the noise-removed version when available
+      2. send it to the transcriber service
+      3. save captions as .vtt / .srt / .txt / .json and the text for search
+    """
+    with connect() as conn:
+        row = row_to_dict(conn.execute("SELECT * FROM recordings WHERE id = ?", (rec_id,)).fetchone())
+    if not row:
+        return
+    src = VIDEOS_DIR / (row["denoised_filename"] or row["filename"])
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = Path(tmp) / "speech.wav"
+            ok, err = _ffmpeg(["-i", str(src), "-vn", "-map", "0:a:0", "-ac", "1", "-ar", "16000",
+                               "-c:a", "pcm_s16le", str(wav)])
+            if not ok or not wav.exists():
+                no_audio = "matches no streams" in err or "does not contain any stream" in err
+                raise RuntimeError("This recording has no audio track" if no_audio else f"Audio extraction failed: {err}")
+            with wav.open("rb") as f:
+                r = httpx.post(
+                    f"{TRANSCRIBER_URL}/transcribe",
+                    files={"file": ("speech.wav", f, "audio/wav")},
+                    data={"words": "0", "max_width": "42"},
+                    timeout=TRANSCRIBER_TIMEOUT_SEC,
+                )
+            if r.status_code != 200:
+                try:
+                    detail = r.json().get("detail", r.text)
+                except Exception:  # noqa: BLE001
+                    detail = r.text
+                raise RuntimeError(f"Transcriber error ({r.status_code}): {detail}")
+            data = r.json()
+        _write_captions(rec_id, data)
+    except httpx.HTTPError as exc:
+        _set_transcript(rec_id, "failed", f"Cannot reach the transcriber service at {TRANSCRIBER_URL} ({type(exc).__name__})")
+        return
+    except Exception as exc:  # noqa: BLE001
+        log.warning("transcription failed for %s: %s", rec_id, exc)
+        _set_transcript(rec_id, "failed", str(exc)[:500])
+        return
+    _set_transcript(rec_id, "done", None, data.get("text", ""))
+
+
+def remove_captions(rec_id: str) -> None:
+    for ext in ("srt", "vtt", "txt", "json"):
+        captions_path(rec_id, ext).unlink(missing_ok=True)
+
+
+def denoise_then_transcribe(rec_id: str, filename: str) -> None:
+    """Clean the audio first, then transcribe the clean version (better accuracy)."""
+    denoise_recording(rec_id, filename)
+    transcribe_recording(rec_id)

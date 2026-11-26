@@ -20,6 +20,8 @@ export interface Settings {
   autoUpload: boolean;
   /** AI noise removal with NVIDIA RE-USE (applied on the server after saving) */
   aiDenoise: boolean;
+  /** Speech to text / subtitles with Sota ASR (Khmer + English), made on the server after saving */
+  autoTranscribe: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -38,6 +40,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoStopMin: 0,
   autoUpload: false,
   aiDenoise: false,
+  autoTranscribe: false,
 };
 
 const KEY = "recorder.settings.v1";

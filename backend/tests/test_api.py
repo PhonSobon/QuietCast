@@ -13,6 +13,7 @@ import pytest
 _TMP = tempfile.mkdtemp(prefix="recorder-test-")
 os.environ["STORAGE_DIR"] = _TMP
 os.environ["DENOISER_URL"] = "http://127.0.0.1:9"  # nothing listens here
+os.environ["TRANSCRIBER_URL"] = "http://127.0.0.1:9"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi.testclient import TestClient  # noqa: E402
@@ -104,3 +105,33 @@ def test_denoise_fails_cleanly_without_service(client, sample_webm):
     assert rec["denoise_status"] == "failed"
     assert "denoiser" in rec["denoise_error"].lower()
     assert client.get(f"/api/recordings/{rid}/file?format=denoised").status_code == 404
+
+
+def test_transcribe_fails_cleanly_without_service(client, sample_webm):
+    assert client.get("/api/health").json()["transcriber"]["available"] is False
+    rid = _upload(client, sample_webm, transcribe="true").json()["id"]
+    rec = client.get(f"/api/recordings/{rid}").json()
+    assert rec["transcript_status"] == "failed" and not rec["has_transcript"]
+    assert "transcriber" in rec["transcript_error"].lower()
+    assert client.get(f"/api/recordings/{rid}/captions").status_code == 404
+    assert client.get(f"/api/recordings/{rid}/transcript").status_code == 404
+
+
+def test_captions_served_and_searchable(client, sample_webm):
+    from app.media import _set_transcript, _write_captions
+
+    rid = _upload(client, sample_webm).json()["id"]
+    data = {"text": "សួស្តី hello world", "captions": [{"start": 0.1, "end": 1.25, "text": "សួស្តី hello world"}]}
+    _write_captions(rid, data)
+    _set_transcript(rid, "done", None, data["text"])
+
+    vtt = client.get(f"/api/recordings/{rid}/captions")
+    assert vtt.status_code == 200 and vtt.text.startswith("WEBVTT")
+    assert "00:00:00.100 --> 00:00:01.250" in vtt.text and "សួស្តី" in vtt.text
+    srt = client.get(f"/api/recordings/{rid}/captions?format=srt&download=true")
+    assert "00:00:00,100 --> 00:00:01,250" in srt.text and "attachment" in srt.headers["content-disposition"]
+    assert client.get(f"/api/recordings/{rid}/transcript").json()["text"] == data["text"]
+    assert any(r["id"] == rid for r in client.get("/api/recordings?q=សួស្តី").json())  # search transcript text
+
+    client.delete(f"/api/recordings/{rid}")
+    assert not list((Path(_TMP) / "captions").glob(f"{rid}.*"))

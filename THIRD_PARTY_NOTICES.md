@@ -19,6 +19,20 @@ Papers:
 - Fu et al., 2026, "Rethinking Training Targets, Architectures and Data Quality for Universal Speech Enhancement", arXiv:2603.02641
 - Fu et al., 2026, "One Model, Many Latencies: Universal Speech Enhancement for Diverse Real-Time Applications", arXiv:2606.25621
 
+## Sota (សោតៈ) Khmer speech recognition: Sota-ASR-Khmer-26M-ONNX
+
+- Source: https://huggingface.co/muyleanging/Sota-ASR-Khmer-26M-ONNX
+- Copyright (c) 2026 Ing Muyleang. All rights reserved.
+- License: **preview license**. You may download and run the model for **personal use, evaluation
+  and research**. Do **not** redistribute the weights or use them in commercial products without
+  written permission from the author. A final license may be published later.
+- Used by: `transcriber/` (the service imports the repository's own `sota_infer.py` / `sota_subs.py`
+  from the downloaded model folder)
+
+The model is **not** included in this repository and must not be committed. Each user downloads
+it to `transcriber/model/` with their own Hugging Face token (`HF_TOKEN`) via
+`transcriber/download_model.py`. Do not bake it into Docker images you publish.
+
 ## Mamba
 
 `denoiser/mamba_cpu.py` is an independent CPU re-implementation of the Mamba (v1) block from
@@ -28,6 +42,6 @@ so that the RE-USE checkpoint can be loaded without the CUDA-only `mamba_ssm` pa
 
 ## Other dependencies
 
-Next.js, React, Tailwind CSS, FastAPI, PyTorch, Numba, ffmpeg and the other packages listed in
+Next.js, React, Tailwind CSS, FastAPI, PyTorch, Numba, ONNX Runtime, soxr, ffmpeg and the other packages listed in
 `frontend/package.json`, `backend/requirements.txt` and `denoiser/requirements.txt` are used
 under their respective licenses. ffmpeg is called as an external program and is not bundled.
