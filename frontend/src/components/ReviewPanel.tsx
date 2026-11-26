@@ -6,6 +6,7 @@ import { type Recording, uploadRecording } from "@/lib/api";
 import { defaultTitle, downloadBlob, formatBytes, formatDuration, safeFilename } from "@/lib/format";
 import type { Mode, RecordingResult } from "@/lib/recorder";
 import SeekableVideo from "./SeekableVideo";
+import { ArrowRightIcon, DownloadIcon, RecordIcon, UploadCloudIcon } from "./icons";
 
 export type ReviewResult = RecordingResult & { url: string; mode: Mode };
 
@@ -128,7 +129,7 @@ export default function ReviewPanel({
 
         <div className="space-y-2">
           <button className="btn btn-secondary w-full" onClick={download}>
-            ⬇ Download to computer
+            <DownloadIcon /> Download to computer
           </button>
 
           {upload.status === "idle" && (
@@ -176,7 +177,7 @@ export default function ReviewPanel({
                 </span>
               </label>
               <button className="btn btn-primary w-full" onClick={save}>
-                ☁ Save to library
+                <UploadCloudIcon /> Save to library
               </button>
             </>
           )}
@@ -201,8 +202,8 @@ export default function ReviewPanel({
               Saved to library.
               {upload.recording.denoise_status === "processing" && " AI noise removal is running…"}
               {upload.recording.transcript_status === "processing" && " Making subtitles…"}{" "}
-              <Link href="/library" className="underline">
-                Open library →
+              <Link href="/library" className="inline-flex items-center gap-1 underline">
+                Open library <ArrowRightIcon className="h-3.5 w-3.5" />
               </Link>
             </div>
           )}
@@ -220,7 +221,7 @@ export default function ReviewPanel({
 
         <div className="flex gap-2 border-t border-white/10 pt-4">
           <button className="btn btn-secondary flex-1" onClick={kept ? onDone : discard}>
-            ● New recording
+            <RecordIcon className="h-3 w-3" /> New recording
           </button>
           {!kept && (
             <button className="btn btn-ghost text-red-300" onClick={discard}>

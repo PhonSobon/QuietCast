@@ -4,6 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import LiveVideo from "./LiveVideo";
 import MicMeter from "./MicMeter";
 import ReviewPanel, { type ReviewResult } from "./ReviewPanel";
+import {
+  CameraIcon,
+  CaptionsIcon,
+  MonitorIcon,
+  MoveIcon,
+  PauseIcon,
+  PlayIcon,
+  SparklesIcon,
+  StatusDot,
+  StopIcon,
+} from "./icons";
 import { Row, Segmented, Tabs, Toggle } from "./ui";
 import { type Health, health } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
@@ -262,8 +273,8 @@ export default function Recorder() {
   // tab title shows the timer (handy when recording another window)
   useEffect(() => {
     const base = "QuietCast";
-    if (phase === "recording") document.title = `● ${formatDuration(elapsedMs / 1000)} Recording`;
-    else if (phase === "paused") document.title = `❚❚ ${formatDuration(elapsedMs / 1000)} Paused`;
+    if (phase === "recording") document.title = `Recording ${formatDuration(elapsedMs / 1000)}`;
+    else if (phase === "paused") document.title = `Paused ${formatDuration(elapsedMs / 1000)}`;
     else document.title = base;
     return () => {
       document.title = base;
@@ -402,10 +413,18 @@ export default function Recorder() {
               )}
             </div>
             <button className="btn btn-secondary" onClick={togglePause}>
-              {phase === "paused" ? "▶ Resume" : "❚❚ Pause"}
+              {phase === "paused" ? (
+                <>
+                  <PlayIcon /> Resume
+                </>
+              ) : (
+                <>
+                  <PauseIcon /> Pause
+                </>
+              )}
             </button>
             <button className="btn btn-primary" onClick={() => void finish()}>
-              ■ Stop
+              <StopIcon /> Stop
             </button>
             {settings.mode === "screen_camera" && (
               <button
@@ -549,8 +568,8 @@ export default function Recorder() {
                 onChange={(mirror) => updateOverlay({ mirror })}
               />
               {settings.mode === "screen_camera" && (
-                <p className="rounded-lg bg-white/[0.04] px-3 py-2 text-xs text-gray-400">
-                  ✋ Drag the camera on the preview to place it anywhere, even while recording.
+                <p className="flex items-center gap-2 rounded-lg bg-white/[0.04] px-3 py-2 text-xs text-gray-400">
+                  <MoveIcon className="h-3.5 w-3.5" /> Drag the camera on the preview to place it anywhere, even while recording.
                 </p>
               )}
             </>
@@ -594,34 +613,38 @@ export default function Recorder() {
               )}
               <div className="space-y-1.5 border-t border-white/10 pt-3">
                 <Toggle
-                  label="✨ AI noise removal"
+                  label="AI noise removal"
+                  icon={<SparklesIcon />}
                   hint="NVIDIA RE-USE cleans the sound after saving."
                   checked={settings.aiDenoise}
                   disabled={!denoiser?.available}
                   onChange={(aiDenoise) => update({ aiDenoise })}
                 />
-                <p className={`text-xs ${denoiser?.available ? "text-emerald-400" : "text-amber-300/80"}`}>
+                <p className={`flex items-center gap-1.5 text-xs ${denoiser?.available ? "text-emerald-400" : "text-amber-300/80"}`}>
+                  {denoiser !== null && <StatusDot on={denoiser.available} />}
                   {denoiser === null
                     ? "Checking AI service…"
                     : denoiser.available
-                      ? `● Ready${denoiser.device ? ` on ${denoiser.device}` : ""}`
-                      : `○ Unavailable: ${denoiser.error ?? "unknown error"}`}
+                      ? `Ready${denoiser.device ? ` on ${denoiser.device}` : ""}`
+                      : `Unavailable: ${denoiser.error ?? "unknown error"}`}
                 </p>
               </div>
               <div className="space-y-1.5 border-t border-white/10 pt-3">
                 <Toggle
-                  label="📝 Subtitles (speech to text)"
+                  label="Subtitles (speech to text)"
+                  icon={<CaptionsIcon />}
                   hint="Khmer, English or both. Made after saving; searchable in the library."
                   checked={settings.autoTranscribe}
                   disabled={!transcriber?.available}
                   onChange={(autoTranscribe) => update({ autoTranscribe })}
                 />
-                <p className={`text-xs ${transcriber?.available ? "text-emerald-400" : "text-amber-300/80"}`}>
+                <p className={`flex items-center gap-1.5 text-xs ${transcriber?.available ? "text-emerald-400" : "text-amber-300/80"}`}>
+                  {transcriber !== null && <StatusDot on={transcriber.available} />}
                   {transcriber === null
                     ? "Checking speech-to-text service…"
                     : transcriber.available
-                      ? "● Ready (Sota ASR, Khmer + English)"
-                      : `○ Unavailable: ${transcriber.error ?? "unknown error"}`}
+                      ? "Ready (Sota ASR, Khmer + English)"
+                      : `Unavailable: ${transcriber.error ?? "unknown error"}`}
                 </p>
               </div>
             </>
@@ -814,8 +837,8 @@ function Placeholder({ text, screen }: { text: string; screen?: boolean }) {
   return (
     <div className="absolute inset-0 grid place-items-center bg-gradient-to-br from-[#151a24] to-[#0b0d12]">
       <div className="text-center text-gray-500">
-        <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-xl border border-white/10 text-2xl">
-          {screen ? "🖥️" : "📷"}
+        <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-xl border border-white/10">
+          {screen ? <MonitorIcon className="h-7 w-7" /> : <CameraIcon className="h-7 w-7" />}
         </div>
         <p className="text-sm">{text}</p>
       </div>
@@ -910,11 +933,11 @@ function CameraBubble({
     >
       {stream && <LiveVideo stream={stream} mirror={o.mirror} fit="cover" className="pointer-events-none h-full w-full" />}
       <span
-        className={`pointer-events-none absolute inset-x-0 bottom-1 mx-auto w-fit rounded-full bg-black/70 px-2 py-0.5 text-[10px] text-white transition ${
+        className={`pointer-events-none absolute inset-x-0 bottom-1 mx-auto flex w-fit items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[10px] text-white transition ${
           dragging ? "opacity-0" : "opacity-0 group-hover:opacity-100"
         }`}
       >
-        ✋ Drag
+        <MoveIcon className="h-3 w-3" /> Drag
       </span>
     </div>
   );

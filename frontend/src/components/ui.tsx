@@ -6,19 +6,24 @@ export function Toggle({
   checked,
   onChange,
   label,
+  icon,
   hint,
   disabled,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
+  icon?: ReactNode;
   hint?: string;
   disabled?: boolean;
 }) {
   return (
     <label className={`flex items-start justify-between gap-3 ${disabled ? "opacity-50" : "cursor-pointer"}`}>
       <span>
-        <span className="block text-sm text-gray-100">{label}</span>
+        <span className="flex items-center gap-1.5 text-sm text-gray-100">
+          {icon}
+          {label}
+        </span>
         {hint && <span className="block text-xs text-gray-500">{hint}</span>}
       </span>
       <button

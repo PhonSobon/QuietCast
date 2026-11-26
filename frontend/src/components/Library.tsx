@@ -20,6 +20,18 @@ import {
 } from "@/lib/api";
 import { formatBytes, formatDate, formatDuration } from "@/lib/format";
 import SeekableVideo from "./SeekableVideo";
+import {
+  CaptionsIcon,
+  DownloadIcon,
+  LinkIcon,
+  PencilIcon,
+  PlayIcon,
+  RecordIcon,
+  RefreshIcon,
+  SparklesIcon,
+  TrashIcon,
+  XIcon,
+} from "./icons";
 
 const MODE_LABEL = { screen: "Screen", camera: "Camera", screen_camera: "Screen + Cam" } as const;
 
@@ -97,7 +109,7 @@ export default function Library() {
             onChange={(e) => setQuery(e.target.value)}
           />
           <Link href="/" className="btn btn-primary shrink-0">
-            ● Record
+            <RecordIcon className="h-3 w-3" /> Record
           </Link>
         </div>
       </div>
@@ -157,13 +169,13 @@ function Card({ rec, onOpen }: { rec: Recording; onOpen: () => void }) {
             onError={() => setThumbOk(false)}
           />
         )}
-        {!thumbOk && <div className="absolute inset-0 grid place-items-center text-3xl text-gray-600">▶</div>}
+        {!thumbOk && <div className="absolute inset-0 grid place-items-center text-gray-600"><PlayIcon className="h-8 w-8" /></div>}
         <span className="absolute bottom-2 right-2 rounded bg-black/75 px-1.5 py-0.5 font-mono text-xs">
           {formatDuration(rec.duration_sec)}
         </span>
         <span className="absolute left-2 top-2 rounded bg-black/75 px-1.5 py-0.5 text-xs">{MODE_LABEL[rec.mode]}</span>
         {rec.has_denoised && (
-          <span className="absolute right-2 top-2 rounded bg-emerald-600/90 px-1.5 py-0.5 text-xs">✨ Clean audio</span>
+          <span className="absolute right-2 top-2 flex items-center gap-1 rounded bg-emerald-600/90 px-1.5 py-0.5 text-xs"><SparklesIcon className="h-3 w-3" /> Clean audio</span>
         )}
         {rec.denoise_status === "processing" && (
           <span className="absolute right-2 top-2 rounded bg-black/75 px-1.5 py-0.5 text-xs">Removing noise…</span>
@@ -175,7 +187,7 @@ function Card({ rec, onOpen }: { rec: Recording; onOpen: () => void }) {
           <span className="absolute bottom-2 left-2 rounded bg-black/75 px-1.5 py-0.5 text-xs">Subtitles…</span>
         )}
         <div className="absolute inset-0 grid place-items-center bg-black/40 opacity-0 transition group-hover:opacity-100">
-          <span className="grid h-12 w-12 place-items-center rounded-full bg-white/90 pl-1 text-xl text-black">▶</span>
+          <span className="grid h-12 w-12 place-items-center rounded-full bg-white/90 pl-0.5 text-black"><PlayIcon className="h-5 w-5" /></span>
         </div>
       </div>
       <div className="p-3">
@@ -340,7 +352,7 @@ function PlayerModal({
               </div>
             )}
             <button className="btn btn-ghost px-2" onClick={onClose} aria-label="Close">
-              ✕
+              <XIcon />
             </button>
           </div>
 
@@ -350,7 +362,7 @@ function PlayerModal({
 
           {/* AI noise removal (NVIDIA NemotronLabs RE-USE) */}
           <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white/[0.04] px-3 py-2.5 text-sm">
-            <span className="font-medium">✨ AI noise removal</span>
+            <span className="flex items-center gap-1.5 font-medium"><SparklesIcon /> AI noise removal</span>
             {rec.has_denoised && (
               <div className="seg">
                 <button data-active={playing === "original"} onClick={() => setVersion("original")}>
@@ -378,7 +390,7 @@ function PlayerModal({
             )}
             {rec.has_denoised && (
               <a className="btn btn-secondary py-1.5" href={fileUrl(rec.id, { format: "denoised", download: true })}>
-                ⬇ Download clean version
+                <DownloadIcon /> Download clean version
               </a>
             )}
             {!denoiserOk && rec.denoise_status !== "processing" && (
@@ -392,7 +404,7 @@ function PlayerModal({
           {/* Speech to text / subtitles (Sota ASR Khmer) */}
           <div className="space-y-3 rounded-lg bg-white/[0.04] px-3 py-2.5 text-sm">
             <div className="flex flex-wrap items-center gap-3">
-              <span className="font-medium">📝 Subtitles</span>
+              <span className="flex items-center gap-1.5 font-medium"><CaptionsIcon /> Subtitles</span>
               {rec.transcript_status === "processing" ? (
                 <span className="flex items-center gap-2 text-gray-300">
                   <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
@@ -422,7 +434,7 @@ function PlayerModal({
                   <div className="ml-auto flex gap-1.5">
                     {(["srt", "vtt", "txt"] as const).map((f) => (
                       <a key={f} className="btn btn-secondary px-2.5 py-1.5 text-xs" href={captionsUrl(rec.id, f, true)}>
-                        ⬇ {f.toUpperCase()}
+                        <DownloadIcon className="h-3.5 w-3.5" /> {f.toUpperCase()}
                       </a>
                     ))}
                   </div>
@@ -463,12 +475,12 @@ function PlayerModal({
 
           <div className="flex flex-wrap gap-2">
             <a className="btn btn-secondary" href={fileUrl(rec.id, { download: true })}>
-              ⬇ Download {isMp4 ? "MP4" : rec.mime_type.split("/")[1]?.toUpperCase()}
+              <DownloadIcon /> Download {isMp4 ? "MP4" : rec.mime_type.split("/")[1]?.toUpperCase()}
             </a>
             {!isMp4 &&
               (rec.has_mp4 ? (
                 <a className="btn btn-secondary" href={fileUrl(rec.id, { format: "mp4", download: true })}>
-                  ⬇ Download MP4
+                  <DownloadIcon /> Download MP4
                 </a>
               ) : rec.convert_status === "processing" ? (
                 <button className="btn btn-secondary" disabled>
@@ -482,7 +494,7 @@ function PlayerModal({
                   disabled={busy || !ffmpeg}
                   title={ffmpeg ? "Convert to MP4 for wider compatibility" : "ffmpeg is not installed on the server"}
                 >
-                  ⟳ {rec.convert_status === "failed" ? "Retry MP4 conversion" : "Convert to MP4"}
+                  <RefreshIcon /> {rec.convert_status === "failed" ? "Retry MP4 conversion" : "Convert to MP4"}
                 </button>
               ))}
             <button
@@ -490,15 +502,15 @@ function PlayerModal({
               onClick={() => navigator.clipboard?.writeText(fileUrl(rec.id))}
               title="Copy a direct link to the video file"
             >
-              🔗 Copy link
+              <LinkIcon /> Copy link
             </button>
             {!editing && (
               <button className="btn btn-secondary" onClick={() => setEditing(true)}>
-                ✎ Rename
+                <PencilIcon /> Rename
               </button>
             )}
             <button className="btn btn-ghost ml-auto text-red-300" onClick={del} disabled={busy}>
-              🗑 Delete
+              <TrashIcon /> Delete
             </button>
           </div>
         </div>
