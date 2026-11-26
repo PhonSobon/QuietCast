@@ -1,0 +1,12 @@
+# Install CPU-only PyTorch first:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+soundfile>=0.12
+numpy
+numba>=0.60
+einops
+pyyaml
+safetensors
+huggingface_hub>=0.24

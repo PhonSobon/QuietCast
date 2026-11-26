@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #ef4444;
+  --color-brand-dark: #dc2626;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background: #0b0d12;
+  color: #e5e7eb;
+}
+
+.card {
+  @apply rounded-2xl border border-white/10 bg-white/[0.03];
+}
+
+.label {
+  @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-400;
+}
+
+.select {
+  @apply w-full rounded-lg border border-white/10 bg-[#141821] px-3 py-2 text-sm text-gray-100 outline-none focus:border-brand;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+}
+.btn-primary {
+  @apply bg-brand text-white hover:bg-brand-dark;
+}
+.btn-secondary {
+  @apply border border-white/10 bg-white/5 text-gray-100 hover:bg-white/10;
+}
+.btn-ghost {
+  @apply text-gray-300 hover:bg-white/5;
+}
+
+.seg {
+  @apply flex rounded-lg border border-white/10 bg-[#141821] p-1;
+}
+.seg button {
+  @apply flex-1 rounded-md px-2 py-1.5 text-xs font-medium text-gray-400 transition;
+}
+.seg button[data-active="true"] {
+  @apply bg-white/10 text-white;
+}

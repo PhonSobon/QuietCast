@@ -1,0 +1,8 @@
+services:
+  denoiser:
+    build: ./denoiser
+    ports:
+      - "8001:8001"
+    environment:
+      SAMPLE_RATE: "16000"
+    restart: unless-stopped
